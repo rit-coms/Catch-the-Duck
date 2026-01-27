@@ -1,0 +1,1 @@
+This folder contains any visual aspects or somthin like that
