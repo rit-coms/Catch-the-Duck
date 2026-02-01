@@ -1,1 +1,5 @@
-print("Hello World3!")
+import Game
+from Game import game
+
+# Start game
+game.start()
