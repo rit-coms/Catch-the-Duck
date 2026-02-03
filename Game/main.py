@@ -8,7 +8,7 @@ clock = pygame.time.Clock()
 gameover=False 
 
 #player
-player_image = pygame.transform.scale(pygame.image.load("Game/img/player.png"), (31, 51))
+player_image = pygame.transform.scale(pygame.image.load("Visual/player.png"), (31, 51))
 player_X, player_Y = 150, 350
 player_Xmove = 0
 
@@ -16,7 +16,7 @@ def player_(x, y):
     screen.blit(player_image, (x, y))
 
 #ai
-ai_image = pygame.transform.scale(pygame.image.load("Game/img/AI.png"), (51, 51))
+ai_image = pygame.transform.scale(pygame.image.load("Visual/AI.png"), (51, 51))
 ai_X, ai_Y = 350, 350
 
 def ai(x, y):
