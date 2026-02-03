@@ -1,5 +1,5 @@
 import Game
-from Game import main
+from Game import game
 
 # Start game
-main.start()
+game.start()
