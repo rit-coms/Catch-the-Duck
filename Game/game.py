@@ -183,8 +183,8 @@ while running:
     if player_image.get_rect(x=player_pos[0], y=player_pos[1]).colliderect(ai_image.get_rect(x=ai_pos[0], y=ai_pos[1])):
             gameover = True
     #horizontal movement
-    player_X += player_Xmove
-    ai_X += ai_Xmove
+    player_pos[0] += player_Xmove
+    ai_pos[0] += ai_Xmove
 
     #auto-jumping
     if player_on_ground and keys[pygame.K_UP]:
@@ -196,36 +196,36 @@ while running:
 
     #player vertical physics (gravity + landing)
     player_Yvel += gravity
-    player_Y += player_Yvel
-    if player_Y >= ground_y:
+    player_pos[1] += player_Yvel
+    if player_pos[1] >= ground_y:
         #snap to ground and reset jump state
-        player_Y = ground_y
+        player_pos[1] = ground_y
         player_Yvel = 0
         player_on_ground = True
 
     #ai vertical physics (gravity + landing)
     ai_Yvel += ai_gravity
-    ai_Y += ai_Yvel
-    if ai_Y >= ai_ground_y:
+    ai_pos[1] += ai_Yvel
+    if ai_pos[1] >= ai_ground_y:
         #snap to ground and reset jump state
-        ai_Y = ai_ground_y
+        ai_pos[1] = ai_ground_y
         ai_Yvel = 0
         ai_on_ground = True
 
     #wrap around screen edges
-    player_X, player_Y = wrap_around(
-        player_X, player_Y,
+    player_pos[0], player_pos[1] = wrap_around(
+        player_pos[0], player_pos[1],
         player_image.get_width(), player_image.get_height(),
         screen.get_width(), screen.get_height()
     )
-    ai_X, ai_Y = wrap_around(
-        ai_X, ai_Y,
+    ai_pos[0], ai_pos[1] = wrap_around(
+        ai_pos[0], ai_pos[1],
         ai_image.get_width(), ai_image.get_height(),
         screen.get_width(), screen.get_height()
     )
 
     #collision between player and ai
-    if player_image.get_rect(x=player_X, y=player_Y).colliderect(ai_image.get_rect(x=ai_X, y=ai_Y)):
+    if player_image.get_rect(x=player_pos[0], y=player_pos[1]).colliderect(ai_image.get_rect(x=ai_pos[0], y=ai_pos[1])):
             if gameover != True:
                 gameover = True
                 elapsed_time = (pygame.time.get_ticks() - start_time) / 1000.0
