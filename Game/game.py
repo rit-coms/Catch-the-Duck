@@ -2,26 +2,27 @@ import pygame, time
 
 """
 todo's
-Getting center of player and ai
-drawing 8 raycasting lines
-getting distance
-stop flicker
-stop line passthrough entrance of object
+make players into rectangles
+put a redo button in there
+make the game replayable
+
 """
 
 
 #screen
 pygame.init()
-SCREEN_WIDTH, SCREEN_HEIGHT = 960, 540
+SCREEN_WIDTH, SCREEN_HEIGHT = 960, 720
 screen = pygame.display.set_mode((SCREEN_WIDTH,SCREEN_HEIGHT))
 pygame.display.set_caption("Catch The Duck!")
 clock = pygame.time.Clock()
 font_gameover = pygame.font.SysFont(None, 72)
 font_timer = pygame.font.SysFont(None, 36)
+background_image = pygame.transform.scale(pygame.image.load("../Visual/test-map.png").convert(), (SCREEN_WIDTH, SCREEN_HEIGHT))
 
 gameover=False
 start_time = pygame.time.get_ticks()
 elapsed_time = 0.0
+CHARACTERS_SCALAR=1.15 #scaling size of player and AI
 
 OBSTACLES = [
     pygame.Rect(100, 100, 50, 200),
@@ -31,48 +32,108 @@ OBSTACLES = [
 
 LINE_COLOR = (255, 0, 0) # Red
 OBSTACLE_COLOR = (0, 0, 255) # Blue
+GROUND_COLOR = (72, 255, 0)
+DEATH_WALL_COLOR = (255, 0, 0)
+
+
+def get_map_color(x, y):
+    """
+    return RGB color of background map at position x,y
+    used to treat map pixels as ground / death walls
+    returns none if position is off screen.
+    """
+    xi, yi = int(x), int(y) #makes sure pixels r ints not floats
+    if 0 <= xi < SCREEN_WIDTH and 0 <= yi < SCREEN_HEIGHT:
+        return background_image.get_at((xi, yi))[:3]
+    return None
+
+
+def character_inside_color(character, color):
+    """
+    checks if the character is inside the ground / death wall
+    only becomes true when the player is already intersecting the ground pixels
+    """
+    left = max(0, character.left)
+    right = min(SCREEN_WIDTH, character.right)
+    top = max(0, character.top)
+    bottom = min(SCREEN_HEIGHT, character.bottom)
+
+    for y in range(top, bottom):
+        for x in range(left, right):
+            if get_map_color(x, y) == color:
+                return True
+    return False
+
+
+def character_over_color(character, color):
+    """
+    checks one row under image character for a map color
+    only detects support just beneath the player (gravity logic basically)
+    """
+    y = character.bottom
+    if y < 0 or y >= SCREEN_HEIGHT:
+        return False
+
+    left = max(0, character.left)
+    right = min(SCREEN_WIDTH, character.right)
+    for x in range(left, right):
+        if get_map_color(x, y) == color:
+            return True
+    return False
+
+
+def respawn(pos, spawn_pos):
+    pos[0], pos[1] = spawn_pos
 
 #player
-player_image = pygame.transform.scale(pygame.image.load("../Visual/player.png"), (31, 51))
-player_pos = [150, 350]
+player_image = pygame.transform.scale(pygame.image.load("../Visual/Ritchie.png"), (34*CHARACTERS_SCALAR, 51*CHARACTERS_SCALAR))
+player_image_flipped = pygame.transform.flip(player_image, True, False)
+PLAYER_SPAWN = (150, 350)
+player_pos = [PLAYER_SPAWN[0], PLAYER_SPAWN[1]]
 player_Xmove = 0
+player_facing_left = True
 
 #player jumping variables
 player_Yvel = 0
 gravity = 0.6
 jump_strength = 12
-ground_y = 350
 player_on_ground = True
 
 def player_(x, y):
-    screen.blit(player_image, (x, y))
+    sprite = player_image if player_facing_left else player_image_flipped
+    screen.blit(sprite, (x, y))
 
 #ai
-ai_image = pygame.transform.scale(pygame.image.load("../Visual/AI.png"), (51, 51))
-ai_pos = [350, 350]
+ai_image = pygame.transform.scale(pygame.image.load("../Visual/gustavo.png"), (37*CHARACTERS_SCALAR, 51*CHARACTERS_SCALAR))
+ai_image_flipped = pygame.transform.flip(ai_image, True, False)
+AI_SPAWN = (350, 350)
+ai_pos = [AI_SPAWN[0], AI_SPAWN[1]]
 ai_Xmove = 0
+ai_facing_left = False
 
 #ai jumping variables
 ai_Yvel = 0
 ai_gravity = 0.6
 ai_jump_strength = 12
-ai_ground_y = 350
 ai_on_ground = True
 
 def ai(x, y):
-    screen.blit(ai_image, (x, y))
+    sprite = ai_image_flipped if ai_facing_left else ai_image
+    screen.blit(sprite, (x, y))
 
-#wrap around screen edges when fully off screen
-def wrap_around(x, y, w, h, screen_w, screen_h):
-    if x > screen_w:
-        x = -w
-    elif x < -w:
-        x = screen_w
-    if y > screen_h:
-        y = -h
-    elif y < -h:
-        y = screen_h
-    return x, y
+"""
+wrap around screen edges when fully off screen
+"""
+def wrap_around(x_pos, y_pos, width, height, screen_width, screen_height):
+    if x_pos > screen_width:
+        x_pos = -width
+    elif x_pos < -width:
+        x_pos = screen_width
+    if y_pos > screen_height:
+        y_pos = -height
+    elif y_pos < -height:
+        y_pos = screen_height
+    return x_pos, y_pos
 
 #starting game loop
 
@@ -80,7 +141,7 @@ running = True
 while running:
     clock.tick(60) #60 fps
 
-    screen.fill((0, 0, 0))  #black bg setup
+    screen.blit(background_image, (0, 0))
     keys = pygame.key.get_pressed() #key state checker
 
     #event scanner
@@ -92,16 +153,20 @@ while running:
                 match event.key:
                     case pygame.K_LEFT:
                         player_Xmove = -1
+                        player_facing_left = True
                     case pygame.K_RIGHT:
                         player_Xmove = 1
+                        player_facing_left = False
                     case pygame.K_UP:
                         if player_on_ground:
                             player_Yvel = -jump_strength
                             player_on_ground = False
                     case pygame.K_a:
                         ai_Xmove = -1
+                        ai_facing_left = True
                     case pygame.K_d:
                         ai_Xmove = 1
+                        ai_facing_left = False
                     case pygame.K_w:
                         if ai_on_ground:
                             ai_Yvel = -ai_jump_strength
@@ -111,24 +176,28 @@ while running:
                     case pygame.K_LEFT:
                         if keys[pygame.K_RIGHT]:
                             player_Xmove = 1
+                            player_facing_left = False
                         else:
                             player_Xmove = 0
                         #stop horizontal movement when key released
                     case pygame.K_RIGHT:
                         if keys[pygame.K_LEFT]:
                             player_Xmove = -1
+                            player_facing_left = True
                         else:
                             player_Xmove = 0
                         #stop horizontal movement when key released
                     case pygame.K_a:
                         if keys[pygame.K_d]:
                             ai_Xmove = 1
+                            ai_facing_left = False
                         else:
                             ai_Xmove = 0
                         #stop horizontal movement when key released
                     case pygame.K_d:
                         if keys[pygame.K_a]:
                             ai_Xmove = -1
+                            ai_facing_left = True
                         else:
                             ai_Xmove = 0
                         #stop horizontal movement when key released
@@ -179,9 +248,6 @@ while running:
         pygame.draw.line(screen, LINE_COLOR, ai_pos, actual_end_pos, 2)
 
 
-    player_pos[0] += player_Xmove
-    if player_image.get_rect(x=player_pos[0], y=player_pos[1]).colliderect(ai_image.get_rect(x=ai_pos[0], y=ai_pos[1])):
-            gameover = True
     #horizontal movement
     player_pos[0] += player_Xmove
     ai_pos[0] += ai_Xmove
@@ -194,23 +260,47 @@ while running:
         ai_Yvel = -ai_jump_strength
         ai_on_ground = False
 
-    #player vertical physics (gravity + landing)
+    #player vertical physics (gravity + landing on map color)
     player_Yvel += gravity
     player_pos[1] += player_Yvel
-    if player_pos[1] >= ground_y:
-        #snap to ground and reset jump state
-        player_pos[1] = ground_y
-        player_Yvel = 0
-        player_on_ground = True
+    player_rect = player_image.get_rect(x=int(player_pos[0]), y=int(player_pos[1]))
+    if player_Yvel >= 0:
+        if character_inside_color(player_rect, GROUND_COLOR):
+            while character_inside_color(player_rect, GROUND_COLOR):
+                player_pos[1] -= 1
+                player_rect.y = int(player_pos[1])
+            player_Yvel = 0
+            player_on_ground = True
+        else:
+            player_on_ground = character_over_color(player_rect, GROUND_COLOR)
+    else:
+        if character_inside_color(player_rect, GROUND_COLOR):
+            while character_inside_color(player_rect, GROUND_COLOR):
+                player_pos[1] += 1
+                player_rect.y = int(player_pos[1])
+            player_Yvel = 0
+        player_on_ground = False
 
-    #ai vertical physics (gravity + landing)
+    #ai vertical physics (gravity + landing on map color)
     ai_Yvel += ai_gravity
     ai_pos[1] += ai_Yvel
-    if ai_pos[1] >= ai_ground_y:
-        #snap to ground and reset jump state
-        ai_pos[1] = ai_ground_y
-        ai_Yvel = 0
-        ai_on_ground = True
+    ai_rect = ai_image.get_rect(x=int(ai_pos[0]), y=int(ai_pos[1]))
+    if ai_Yvel >= 0:
+        if character_inside_color(ai_rect, GROUND_COLOR):
+            while character_inside_color(ai_rect, GROUND_COLOR):
+                ai_pos[1] -= 1
+                ai_rect.y = int(ai_pos[1])
+            ai_Yvel = 0
+            ai_on_ground = True
+        else:
+            ai_on_ground = character_over_color(ai_rect, GROUND_COLOR)
+    else:
+        if character_inside_color(ai_rect, GROUND_COLOR):
+            while character_inside_color(ai_rect, GROUND_COLOR):
+                ai_pos[1] += 1
+                ai_rect.y = int(ai_pos[1])
+            ai_Yvel = 0
+        ai_on_ground = False
 
     #wrap around screen edges
     player_pos[0], player_pos[1] = wrap_around(
@@ -223,6 +313,21 @@ while running:
         ai_image.get_width(), ai_image.get_height(),
         screen.get_width(), screen.get_height()
     )
+
+    #death walls from map color
+    player_rect = player_image.get_rect(x=int(player_pos[0]), y=int(player_pos[1]))
+    if character_inside_color(player_rect, DEATH_WALL_COLOR):
+        respawn(player_pos, PLAYER_SPAWN)
+        player_Yvel = 0
+        player_Xmove = 0
+        player_on_ground = False
+
+    ai_rect = ai_image.get_rect(x=int(ai_pos[0]), y=int(ai_pos[1]))
+    if character_inside_color(ai_rect, DEATH_WALL_COLOR):
+        respawn(ai_pos, AI_SPAWN)
+        ai_Yvel = 0
+        ai_Xmove = 0
+        ai_on_ground = False
 
     #collision between player and ai
     if player_image.get_rect(x=player_pos[0], y=player_pos[1]).colliderect(ai_image.get_rect(x=ai_pos[0], y=ai_pos[1])):
