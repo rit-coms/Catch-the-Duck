@@ -1,4 +1,9 @@
+import math
+
 import pygame, time
+from pygame import Vector2
+
+import raycasting as rc
 
 """
 todo's
@@ -45,7 +50,8 @@ ground_y = 350
 player_on_ground = True
 
 def player_(x, y):
-    screen.blit(player_image, (x, y))
+    player_rect = pygame.Rect(x, y, 31, 51)
+    screen.blit(player_image, player_rect)
 
 #ai
 ai_image = pygame.transform.scale(pygame.image.load("../Visual/AI.png"), (51, 51))
@@ -60,7 +66,9 @@ ai_ground_y = 350
 ai_on_ground = True
 
 def ai(x, y):
-    screen.blit(ai_image, (x, y))
+    ai_rect = pygame.Rect(x, y, 51, 51)
+    screen.blit(ai_image, ai_rect)
+
 
 #wrap around screen edges when fully off screen
 def wrap_around(x, y, w, h, screen_w, screen_h):
@@ -133,50 +141,37 @@ while running:
                             ai_Xmove = 0
                         #stop horizontal movement when key released
 
-        # Get mouse position for line direction
-        mouse_pos = pygame.mouse.get_pos()
+    # Get mouse position for line direction
+    #mouse_pos = pygame.mouse.get_pos()
+    far_end_pos = rc.cast_rays(ai_pos, SCREEN_WIDTH, SCREEN_HEIGHT)
 
-        # Calculate a distant end point for the theoretical line (raycasting)
-        # This point should be far enough to cover the whole screen or more
-        # A simple way for a line of sight is to use a large vector towards the mouse
-        direction_vector = (mouse_pos[0] - ai_pos[0], mouse_pos[1] - ai_pos[1])
-        # Normalize and multiply by a large distance (e.g., screen dimensions)
-        distance = max(SCREEN_WIDTH, SCREEN_HEIGHT)
-        if direction_vector[0] != 0 or direction_vector[1] != 0:
-            length = (direction_vector[0] ** 2 + direction_vector[1] ** 2) ** 0.5
-            normalized_direction = (direction_vector[0] / length, direction_vector[1] / length)
-            far_end_pos = (ai_pos[0] + normalized_direction[0] * distance,
-                           ai_pos[1] + normalized_direction[1] * distance)
-        else:
-            far_end_pos = mouse_pos
+    # Default end point is the far point
+    actual_end_pos = far_end_pos
 
-        # Default end point is the far point
-        actual_end_pos = far_end_pos
+    # Check for collisions with obstacles
+    for obstacle in OBSTACLES:
+        # clipline returns a tuple of ((start_x, start_y), (end_x, end_y)) if it collides
+        # or an empty tuple if not
+        clipped_line = obstacle.clipline(ai_pos, far_end_pos)
+        if clipped_line:
+            # The first point of the clipped line is the intersection point
+            intersection_point = clipped_line[0]
+            # We want the *closest* intersection point if there are multiple obstacles.
+            # This logic finds the first one, for multiple you'd need to compare distances.
+            # A more robust raycasting system would be needed for complex maps.
 
-        # Check for collisions with obstacles
-        for obstacle in OBSTACLES:
-            # clipline returns a tuple of ((start_x, start_y), (end_x, end_y)) if it collides
-            # or an empty tuple if not
-            clipped_line = obstacle.clipline(ai_pos, far_end_pos)
-            if clipped_line:
-                # The second point of the clipped line is the intersection point
-                intersection_point = clipped_line[1]
-                # We want the *closest* intersection point if there are multiple obstacles.
-                # This logic finds the first one, for multiple you'd need to compare distances.
-                # A more robust raycasting system would be needed for complex maps.
-
-                # For simplicity, we just stop at the first one in the loop
-                actual_end_pos = intersection_point
-                break  # Stop checking other obstacles once a collision is found
+            # For simplicity, we just stop at the first one in the loop
+            actual_end_pos = intersection_point
+            break  # Stop checking other obstacles once a collision is found
 
 
 
-        # Draw obstacles
-        for obstacle in OBSTACLES:
-            pygame.draw.rect(screen, OBSTACLE_COLOR, obstacle)
+    # Draw obstacles
+    for obstacle in OBSTACLES:
+        pygame.draw.rect(screen, OBSTACLE_COLOR, obstacle)
 
-        # Draw the line that stops at the collision point
-        pygame.draw.line(screen, LINE_COLOR, ai_pos, actual_end_pos, 2)
+    # Draw the line that stops at the collision point and print distance
+    print(Vector2(ai_pos).distance_to(Vector2(actual_end_pos)))
 
 
     player_pos[0] += player_Xmove
@@ -235,6 +230,7 @@ while running:
         #draw player and ai
         player_(player_pos[0], player_pos[1])
         ai(ai_pos[0], ai_pos[1])
+        pygame.draw.line(screen, LINE_COLOR, ai_pos, actual_end_pos, 2)
     else:
         #game over screen (needs a game over png and replay button)
         text = font_gameover.render("GAME OVER", True, (255, 0, 0))
