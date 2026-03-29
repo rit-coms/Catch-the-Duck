@@ -219,6 +219,9 @@ while running:
             gameover = True
             elapsed_time = (pygame.time.get_ticks() - start_time) / 1000.0
 
+    # getting other inputs
+    dist_from_player = Vector2(ai_pos).distance_to(Vector2(player_pos))
+
     # Render
     if not gameover:
         # Draw obstacles
