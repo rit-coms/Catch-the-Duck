@@ -1,30 +1,17 @@
 import math
-
-import pygame, time
+import pygame
 from pygame import Vector2
-
-import raycasting as rc
-
-"""
-todo's
-Getting center of player and ai
-drawing 8 raycasting lines
-getting distance
-stop flicker
-stop line passthrough entrance of object
-"""
-
 
 #screen
 pygame.init()
 SCREEN_WIDTH, SCREEN_HEIGHT = 960, 540
-screen = pygame.display.set_mode((SCREEN_WIDTH,SCREEN_HEIGHT))
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption("Catch The Duck!")
 clock = pygame.time.Clock()
 font_gameover = pygame.font.SysFont(None, 72)
 font_timer = pygame.font.SysFont(None, 36)
 
-gameover=False
+gameover = False
 start_time = pygame.time.get_ticks()
 elapsed_time = 0.0
 
@@ -34,8 +21,53 @@ OBSTACLES = [
     pygame.Rect(350, 450, 100, 50)
 ]
 
-LINE_COLOR = (255, 0, 0) # Red
+LINE_COLOR = (255, 0, 0)    # Red
 OBSTACLE_COLOR = (0, 0, 255) # Blue
+
+# 8 ray directions as unit vectors
+RAY_DIRECTIONS = {
+    "right":      ( 1,  0),
+    "left":       (-1,  0),
+    "down":       ( 0,  1),
+    "up":         ( 0, -1),
+    "up_right":   ( 1, -1),
+    "up_left":    (-1, -1),
+    "down_right": ( 1,  1),
+    "down_left":  (-1,  1),
+}
+
+RAY_LENGTH = max(SCREEN_WIDTH, SCREEN_HEIGHT)
+
+def cast_8_rays(origin, obstacles, screen_w, screen_h, ray_length):
+    results = {}
+
+    for i in range(8):
+        angle = math.radians(i * 45)
+        dx = math.cos(angle)
+        dy = math.sin(angle)
+
+        # Just use a long ray, no clamping
+        far_end = (origin[0] + dx * ray_length, origin[1] + dy * ray_length)
+
+        closest_point = far_end
+        closest_dist = Vector2(origin).distance_to(Vector2(far_end))
+
+        for obstacle in obstacles:
+            clipped = obstacle.clipline(origin, far_end)
+            if clipped:
+                hit_point = clipped[0]
+                dist = Vector2(origin).distance_to(Vector2(hit_point))
+                if dist < closest_dist:
+                    closest_dist = dist
+                    closest_point = hit_point
+
+        results[i] = {
+            "distance": closest_dist,
+            "endpoint": closest_point,
+            "angle": math.degrees(angle)
+        }
+
+    return results
 
 #player
 player_image = pygame.transform.scale(pygame.image.load("../Visual/player.png"), (31, 51))
@@ -69,7 +101,6 @@ def ai(x, y):
     ai_rect = pygame.Rect(x, y, 51, 51)
     screen.blit(ai_image, ai_rect)
 
-
 #wrap around screen edges when fully off screen
 def wrap_around(x, y, w, h, screen_w, screen_h):
     if x > screen_w:
@@ -83,15 +114,14 @@ def wrap_around(x, y, w, h, screen_w, screen_h):
     return x, y
 
 #starting game loop
-
 running = True
 while running:
-    clock.tick(60) #60 fps
+    clock.tick(60)  # 60 fps
 
-    screen.fill((0, 0, 0))  #black bg setup
-    keys = pygame.key.get_pressed() #key state checker
+    screen.fill((0, 0, 0))  # black bg
+    keys = pygame.key.get_pressed()
 
-    #event scanner
+    # Event scanner
     for event in pygame.event.get():
         match event.type:
             case pygame.QUIT:
@@ -121,67 +151,32 @@ while running:
                             player_Xmove = 1
                         else:
                             player_Xmove = 0
-                        #stop horizontal movement when key released
                     case pygame.K_RIGHT:
                         if keys[pygame.K_LEFT]:
                             player_Xmove = -1
                         else:
                             player_Xmove = 0
-                        #stop horizontal movement when key released
                     case pygame.K_a:
                         if keys[pygame.K_d]:
                             ai_Xmove = 1
                         else:
                             ai_Xmove = 0
-                        #stop horizontal movement when key released
                     case pygame.K_d:
                         if keys[pygame.K_a]:
                             ai_Xmove = -1
                         else:
                             ai_Xmove = 0
-                        #stop horizontal movement when key released
 
-    # Get mouse position for line direction
-    #mouse_pos = pygame.mouse.get_pos()
-    far_end_pos = rc.cast_rays(ai_pos, SCREEN_WIDTH, SCREEN_HEIGHT)
+    # Cast all 8 rays from the AI
+    ai_center = [ai_pos[0] + ai_image.get_width() // 2, ai_pos[1] + ai_image.get_height() // 2]
+    ray_data = cast_8_rays(ai_center, OBSTACLES, SCREEN_WIDTH, SCREEN_HEIGHT, RAY_LENGTH)
+    distances = {name: data["distance"] for name, data in ray_data.items()}
 
-    # Default end point is the far point
-    actual_end_pos = far_end_pos
-
-    # Check for collisions with obstacles
-    for obstacle in OBSTACLES:
-        # clipline returns a tuple of ((start_x, start_y), (end_x, end_y)) if it collides
-        # or an empty tuple if not
-        clipped_line = obstacle.clipline(ai_pos, far_end_pos)
-        if clipped_line:
-            # The first point of the clipped line is the intersection point
-            intersection_point = clipped_line[0]
-            # We want the *closest* intersection point if there are multiple obstacles.
-            # This logic finds the first one, for multiple you'd need to compare distances.
-            # A more robust raycasting system would be needed for complex maps.
-
-            # For simplicity, we just stop at the first one in the loop
-            actual_end_pos = intersection_point
-            break  # Stop checking other obstacles once a collision is found
-
-
-
-    # Draw obstacles
-    for obstacle in OBSTACLES:
-        pygame.draw.rect(screen, OBSTACLE_COLOR, obstacle)
-
-    # Draw the line that stops at the collision point and print distance
-    print(Vector2(ai_pos).distance_to(Vector2(actual_end_pos)))
-
-
-    player_pos[0] += player_Xmove
-    if player_image.get_rect(x=player_pos[0], y=player_pos[1]).colliderect(ai_image.get_rect(x=ai_pos[0], y=ai_pos[1])):
-            gameover = True
-    #horizontal movement
+    # Horizontal movement
     player_pos[0] += player_Xmove
     ai_pos[0] += ai_Xmove
 
-    #auto-jumping
+    # Auto-jumping (held key)
     if player_on_ground and keys[pygame.K_UP]:
         player_Yvel = -jump_strength
         player_on_ground = False
@@ -189,25 +184,23 @@ while running:
         ai_Yvel = -ai_jump_strength
         ai_on_ground = False
 
-    #player vertical physics (gravity + landing)
+    # Player vertical physics
     player_Yvel += gravity
     player_pos[1] += player_Yvel
     if player_pos[1] >= ground_y:
-        #snap to ground and reset jump state
         player_pos[1] = ground_y
         player_Yvel = 0
         player_on_ground = True
 
-    #ai vertical physics (gravity + landing)
+    # AI vertical physics
     ai_Yvel += ai_gravity
     ai_pos[1] += ai_Yvel
     if ai_pos[1] >= ai_ground_y:
-        #snap to ground and reset jump state
         ai_pos[1] = ai_ground_y
         ai_Yvel = 0
         ai_on_ground = True
 
-    #wrap around screen edges
+    # Wrap around screen edges
     player_pos[0], player_pos[1] = wrap_around(
         player_pos[0], player_pos[1],
         player_image.get_width(), player_image.get_height(),
@@ -219,25 +212,38 @@ while running:
         screen.get_width(), screen.get_height()
     )
 
-    #collision between player and ai
-    if player_image.get_rect(x=player_pos[0], y=player_pos[1]).colliderect(ai_image.get_rect(x=ai_pos[0], y=ai_pos[1])):
-            if gameover != True:
-                gameover = True
-                elapsed_time = (pygame.time.get_ticks() - start_time) / 1000.0
+    # Collision between player and AI
+    if player_image.get_rect(x=player_pos[0], y=player_pos[1]).colliderect(
+            ai_image.get_rect(x=ai_pos[0], y=ai_pos[1])):
+        if not gameover:
+            gameover = True
+            elapsed_time = (pygame.time.get_ticks() - start_time) / 1000.0
 
-    #render
-    if gameover!=True:
-        #draw player and ai
+    # Render
+    if not gameover:
+        # Draw obstacles
+        for obstacle in OBSTACLES:
+            pygame.draw.rect(screen, OBSTACLE_COLOR, obstacle)
+
+        # Draw all 8 rays
+        for name, data in ray_data.items():
+            pygame.draw.line(screen, LINE_COLOR, ai_center, data["endpoint"], 2)
+
+        # Draw player and AI
         player_(player_pos[0], player_pos[1])
         ai(ai_pos[0], ai_pos[1])
-        pygame.draw.line(screen, LINE_COLOR, ai_pos, actual_end_pos, 2)
     else:
-        #game over screen (needs a game over png and replay button)
+        # Game over screen
         text = font_gameover.render("GAME OVER", True, (255, 0, 0))
-        screen.blit(text, (screen.get_width()//2 - text.get_width()//2, screen.get_height()//2 - text.get_height()//2))
+        screen.blit(text, (
+            screen.get_width() // 2 - text.get_width() // 2,
+            screen.get_height() // 2 - text.get_height() // 2
+        ))
         timer_msg = f"Time: {elapsed_time:.2f}s"
         timer_text = font_timer.render(timer_msg, True, (255, 255, 255))
-        screen.blit(timer_text, (screen.get_width()//2 - timer_text.get_width()//2, screen.get_height()//2 + 40))
-
+        screen.blit(timer_text, (
+            screen.get_width() // 2 - timer_text.get_width() // 2,
+            screen.get_height() // 2 + 40
+        ))
 
     pygame.display.update()
