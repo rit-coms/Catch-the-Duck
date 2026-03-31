@@ -17,7 +17,8 @@ pygame.display.set_caption("Catch The Duck!")
 clock = pygame.time.Clock()
 font_gameover = pygame.font.SysFont(None, 72)
 font_timer = pygame.font.SysFont(None, 36)
-background_image = pygame.transform.scale(pygame.image.load("../Visual/test-map.png").convert(), (SCREEN_WIDTH, SCREEN_HEIGHT))
+background_image = pygame.transform.scale(pygame.image.load("../Visual/CatchTheDuckBackground.PNG").convert(), (SCREEN_WIDTH, SCREEN_HEIGHT))
+map = pygame.transform.scale(pygame.image.load("../Visual/map.png").convert_alpha(), (SCREEN_WIDTH, SCREEN_HEIGHT))
 
 gameover=False
 start_time = pygame.time.get_ticks()
@@ -32,8 +33,11 @@ OBSTACLES = [
 
 LINE_COLOR = (255, 0, 0) # Red
 OBSTACLE_COLOR = (0, 0, 255) # Blue
-GROUND_COLOR = (72, 255, 0)
-DEATH_WALL_COLOR = (255, 0, 0)
+GROUND_COLORS = {
+    (0x7A, 0x3E, 0x0F),
+    (0x3A, 0xA9, 0x4F),
+}
+DEATH_WALL_COLOR = (0xED, 0x4E, 0x4E)
 
 
 def get_map_color(x, y):
@@ -44,8 +48,14 @@ def get_map_color(x, y):
     """
     xi, yi = int(x), int(y) #makes sure pixels r ints not floats
     if 0 <= xi < SCREEN_WIDTH and 0 <= yi < SCREEN_HEIGHT:
-        return background_image.get_at((xi, yi))[:3]
+        return map.get_at((xi, yi))[:3]
     return None
+
+
+def color_matches(pixel_color, target_colors):
+    if isinstance(target_colors, set):
+        return pixel_color in target_colors
+    return pixel_color == target_colors
 
 
 def character_inside_color(character, color):
@@ -60,7 +70,7 @@ def character_inside_color(character, color):
 
     for y in range(top, bottom):
         for x in range(left, right):
-            if get_map_color(x, y) == color:
+            if color_matches(get_map_color(x, y), color):
                 return True
     return False
 
@@ -77,7 +87,7 @@ def character_over_color(character, color):
     left = max(0, character.left)
     right = min(SCREEN_WIDTH, character.right)
     for x in range(left, right):
-        if get_map_color(x, y) == color:
+        if color_matches(get_map_color(x, y), color):
             return True
     return False
 
@@ -88,7 +98,7 @@ def respawn(pos, spawn_pos):
 #player
 player_image = pygame.transform.scale(pygame.image.load("../Visual/Ritchie.png"), (34*CHARACTERS_SCALAR, 51*CHARACTERS_SCALAR))
 player_image_flipped = pygame.transform.flip(player_image, True, False)
-PLAYER_SPAWN = (150, 350)
+PLAYER_SPAWN = (SCREEN_WIDTH/5, 580)
 player_pos = [PLAYER_SPAWN[0], PLAYER_SPAWN[1]]
 player_Xmove = 0
 player_facing_left = True
@@ -106,7 +116,7 @@ def player_(x, y):
 #ai
 ai_image = pygame.transform.scale(pygame.image.load("../Visual/gustavo.png"), (37*CHARACTERS_SCALAR, 51*CHARACTERS_SCALAR))
 ai_image_flipped = pygame.transform.flip(ai_image, True, False)
-AI_SPAWN = (350, 350)
+AI_SPAWN = (SCREEN_WIDTH-(SCREEN_WIDTH/5), 580)
 ai_pos = [AI_SPAWN[0], AI_SPAWN[1]]
 ai_Xmove = 0
 ai_facing_left = False
@@ -142,6 +152,7 @@ while running:
     clock.tick(60) #60 fps
 
     screen.blit(background_image, (0, 0))
+    screen.blit(map,(0,0))
     keys = pygame.key.get_pressed() #key state checker
 
     #event scanner
@@ -265,17 +276,17 @@ while running:
     player_pos[1] += player_Yvel
     player_rect = player_image.get_rect(x=int(player_pos[0]), y=int(player_pos[1]))
     if player_Yvel >= 0:
-        if character_inside_color(player_rect, GROUND_COLOR):
-            while character_inside_color(player_rect, GROUND_COLOR):
+        if character_inside_color(player_rect, GROUND_COLORS):
+            while character_inside_color(player_rect, GROUND_COLORS):
                 player_pos[1] -= 1
                 player_rect.y = int(player_pos[1])
             player_Yvel = 0
             player_on_ground = True
         else:
-            player_on_ground = character_over_color(player_rect, GROUND_COLOR)
+            player_on_ground = character_over_color(player_rect, GROUND_COLORS)
     else:
-        if character_inside_color(player_rect, GROUND_COLOR):
-            while character_inside_color(player_rect, GROUND_COLOR):
+        if character_inside_color(player_rect, GROUND_COLORS):
+            while character_inside_color(player_rect, GROUND_COLORS):
                 player_pos[1] += 1
                 player_rect.y = int(player_pos[1])
             player_Yvel = 0
@@ -286,17 +297,17 @@ while running:
     ai_pos[1] += ai_Yvel
     ai_rect = ai_image.get_rect(x=int(ai_pos[0]), y=int(ai_pos[1]))
     if ai_Yvel >= 0:
-        if character_inside_color(ai_rect, GROUND_COLOR):
-            while character_inside_color(ai_rect, GROUND_COLOR):
+        if character_inside_color(ai_rect, GROUND_COLORS):
+            while character_inside_color(ai_rect, GROUND_COLORS):
                 ai_pos[1] -= 1
                 ai_rect.y = int(ai_pos[1])
             ai_Yvel = 0
             ai_on_ground = True
         else:
-            ai_on_ground = character_over_color(ai_rect, GROUND_COLOR)
+            ai_on_ground = character_over_color(ai_rect, GROUND_COLORS)
     else:
-        if character_inside_color(ai_rect, GROUND_COLOR):
-            while character_inside_color(ai_rect, GROUND_COLOR):
+        if character_inside_color(ai_rect, GROUND_COLORS):
+            while character_inside_color(ai_rect, GROUND_COLORS):
                 ai_pos[1] += 1
                 ai_rect.y = int(ai_pos[1])
             ai_Yvel = 0
