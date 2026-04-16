@@ -1,13 +1,15 @@
-import pygame, time
+import math
+import pygame
+from pygame import Vector2
+import time
+from Model.duck_agent import DuckAgent
 
 """
 todo's
 make players into rectangles
 put a redo button in there
 make the game replayable
-
 """
-
 
 #screen
 pygame.init()
@@ -20,7 +22,7 @@ font_timer = pygame.font.SysFont(None, 36)
 background_image = pygame.transform.scale(pygame.image.load("../Visual/CatchTheDuckBackground.PNG").convert(), (SCREEN_WIDTH, SCREEN_HEIGHT))
 map = pygame.transform.scale(pygame.image.load("../Visual/map.png").convert_alpha(), (SCREEN_WIDTH, SCREEN_HEIGHT))
 
-gameover=False
+gameover = False
 start_time = pygame.time.get_ticks()
 elapsed_time = 0.0
 CHARACTERS_SCALAR=1.15 #scaling size of player and AI
@@ -38,6 +40,9 @@ GROUND_COLORS = {
     (0x3A, 0xA9, 0x4F),
 }
 DEATH_WALL_COLOR = (0xED, 0x4E, 0x4E)
+
+# initialize agent
+agent = DuckAgent()
 
 
 def get_map_color(x, y):
@@ -95,8 +100,50 @@ def character_over_color(character, color):
 def respawn(pos, spawn_pos):
     pos[0], pos[1] = spawn_pos
 
-#player
-player_image = pygame.transform.scale(pygame.image.load("../Visual/Ritchie.png"), (34*CHARACTERS_SCALAR, 51*CHARACTERS_SCALAR))
+
+RAY_DIRECTIONS = {
+    "right":      ( 1,  0),
+    "left":       (-1,  0),
+    "down":       ( 0,  1),
+    "up":         ( 0, -1),
+    "up_right":   ( 1, -1),
+    "up_left":    (-1, -1),
+    "down_right": ( 1,  1),
+    "down_left":  (-1,  1),
+}
+
+RAY_LENGTH = max(SCREEN_WIDTH, SCREEN_HEIGHT)
+
+
+def cast_8_rays(origin, obstacles, screen_w, screen_h, ray_length):
+    results = {}
+    for i in range(8):
+        angle = math.radians(i * 45)
+        dx = math.cos(angle)
+        dy = math.sin(angle)
+        far_end = (origin[0] + dx * ray_length, origin[1] + dy * ray_length)
+        closest_point = far_end
+        closest_dist = Vector2(origin).distance_to(Vector2(far_end))
+        for obstacle in obstacles:
+            clipped = obstacle.clipline(origin, far_end)
+            if clipped:
+                hit_point = clipped[0]
+                dist = Vector2(origin).distance_to(Vector2(hit_point))
+                if dist < closest_dist:
+                    closest_dist = dist
+                    closest_point = hit_point
+        results[i] = {
+            "distance": closest_dist,
+            "endpoint": closest_point,
+            "angle": math.degrees(angle)
+        }
+    return results
+
+
+# player
+player_image = pygame.transform.scale(
+    pygame.image.load("../Visual/Ritchie.png"), (34 * CHARACTERS_SCALAR, 51 * CHARACTERS_SCALAR)
+)
 player_image_flipped = pygame.transform.flip(player_image, True, False)
 PLAYER_SPAWN = (SCREEN_WIDTH/5, 580)
 player_pos = [PLAYER_SPAWN[0], PLAYER_SPAWN[1]]
@@ -111,6 +158,7 @@ player_on_ground = True
 
 def player_(x, y):
     sprite = player_image if player_facing_left else player_image_flipped
+    player_rect = pygame.Rect(x, y, 31, 51)
     screen.blit(sprite, (x, y))
 
 #ai
@@ -129,6 +177,7 @@ ai_on_ground = True
 
 def ai(x, y):
     sprite = ai_image_flipped if ai_facing_left else ai_image
+    ai_rect = pygame.Rect(x, y, 51, 51)
     screen.blit(sprite, (x, y))
 
 """
@@ -145,9 +194,48 @@ def wrap_around(x_pos, y_pos, width, height, screen_width, screen_height):
         y_pos = screen_height
     return x_pos, y_pos
 
-#starting game loop
 
+def apply_action(action):
+    """
+    Translates action index into duck movement.
+    Returns (x_move, should_jump, facing_left)
+    0: idle
+    1: left
+    2: right
+    3: jump
+    4: jump + left
+    5: jump + right
+    """
+    x_move = 0
+    should_jump = False
+    facing = ai_facing_left  # default: keep current facing
+
+    if action == 0:   # idle
+        x_move = 0
+    elif action == 1: # left
+        x_move = -1
+        facing = True
+    elif action == 2: # right
+        x_move = 1
+        facing = False
+    elif action == 3: # jump
+        should_jump = True
+    elif action == 4: # jump + left
+        x_move = -1
+        should_jump = True
+        facing = True
+    elif action == 5: # jump + right
+        x_move = 1
+        should_jump = True
+        facing = False
+
+    return x_move, should_jump, facing
+
+
+# starting game loop
 running = True
+caught_this_frame = False
+
 while running:
     clock.tick(60) #60 fps
 
@@ -172,16 +260,7 @@ while running:
                         if player_on_ground:
                             player_Yvel = -jump_strength
                             player_on_ground = False
-                    case pygame.K_a:
-                        ai_Xmove = -1
-                        ai_facing_left = True
-                    case pygame.K_d:
-                        ai_Xmove = 1
-                        ai_facing_left = False
-                    case pygame.K_w:
-                        if ai_on_ground:
-                            ai_Yvel = -ai_jump_strength
-                            ai_on_ground = False
+                    # No more ai WASD controls
             case pygame.KEYUP:
                 match event.key:
                     case pygame.K_LEFT:
@@ -216,54 +295,34 @@ while running:
         # Get mouse position for line direction
         mouse_pos = pygame.mouse.get_pos()
 
-        # Calculate a distant end point for the theoretical line (raycasting)
-        # This point should be far enough to cover the whole screen or more
-        # A simple way for a line of sight is to use a large vector towards the mouse
-        direction_vector = (mouse_pos[0] - ai_pos[0], mouse_pos[1] - ai_pos[1])
-        # Normalize and multiply by a large distance (e.g., screen dimensions)
-        distance = max(SCREEN_WIDTH, SCREEN_HEIGHT)
-        if direction_vector[0] != 0 or direction_vector[1] != 0:
-            length = (direction_vector[0] ** 2 + direction_vector[1] ** 2) ** 0.5
-            normalized_direction = (direction_vector[0] / length, direction_vector[1] / length)
-            far_end_pos = (ai_pos[0] + normalized_direction[0] * distance,
-                           ai_pos[1] + normalized_direction[1] * distance)
-        else:
-            far_end_pos = mouse_pos
+    # ai logic
+    ai_center = [ai_pos[0] + ai_image.get_width() // 2,
+                 ai_pos[1] + ai_image.get_height() // 2]
+    ray_data = cast_8_rays(ai_center, OBSTACLES, SCREEN_WIDTH, SCREEN_HEIGHT, RAY_LENGTH)
 
-        # Default end point is the far point
-        actual_end_pos = far_end_pos
+    obs = agent.build_observation(
+        ai_pos=ai_pos,
+        ai_vel_x=ai_Xmove,
+        ai_vel_y=ai_Yvel,
+        ai_on_ground=ai_on_ground,
+        player_pos=player_pos,
+        ray_data=ray_data,
+        screen_w=SCREEN_WIDTH,
+        screen_h=SCREEN_HEIGHT
+    )
 
-        # Check for collisions with obstacles
-        for obstacle in OBSTACLES:
-            # clipline returns a tuple of ((start_x, start_y), (end_x, end_y)) if it collides
-            # or an empty tuple if not
-            clipped_line = obstacle.clipline(ai_pos, far_end_pos)
-            if clipped_line:
-                # The second point of the clipped line is the intersection point
-                intersection_point = clipped_line[1]
-                # We want the *closest* intersection point if there are multiple obstacles.
-                # This logic finds the first one, for multiple you'd need to compare distances.
-                # A more robust raycasting system would be needed for complex maps.
+    action = agent.select_action(obs)
+    ai_Xmove, should_jump, ai_facing_left = apply_action(action)
 
-                # For simplicity, we just stop at the first one in the loop
-                actual_end_pos = intersection_point
-                break  # Stop checking other obstacles once a collision is found
+    if should_jump and ai_on_ground:
+        ai_Yvel = -ai_jump_strength
+        ai_on_ground = False
 
-
-
-        # Draw obstacles
-        for obstacle in OBSTACLES:
-            pygame.draw.rect(screen, OBSTACLE_COLOR, obstacle)
-
-        # Draw the line that stops at the collision point
-        pygame.draw.line(screen, LINE_COLOR, ai_pos, actual_end_pos, 2)
-
-
-    #horizontal movement
+    # horizontal movement
     player_pos[0] += player_Xmove
     ai_pos[0] += ai_Xmove
 
-    #auto-jumping
+    # auto-jumping for player
     if player_on_ground and keys[pygame.K_UP]:
         player_Yvel = -jump_strength
         player_on_ground = False
@@ -340,24 +399,53 @@ while running:
         ai_Xmove = 0
         ai_on_ground = False
 
-    #collision between player and ai
-    if player_image.get_rect(x=player_pos[0], y=player_pos[1]).colliderect(ai_image.get_rect(x=ai_pos[0], y=ai_pos[1])):
-            if gameover != True:
-                gameover = True
-                elapsed_time = (pygame.time.get_ticks() - start_time) / 1000.0
+    # collision
+    caught_this_frame = player_image.get_rect(
+        x=player_pos[0], y=player_pos[1]
+    ).colliderect(
+        ai_image.get_rect(x=ai_pos[0], y=ai_pos[1])
+    )
 
-    #render
-    if gameover!=True:
-        #draw player and ai
+    if caught_this_frame and not gameover:
+        gameover = True
+        elapsed_time = (pygame.time.get_ticks() - start_time) / 1000.0
+
+    # calculate reward and store experience
+    reward = agent.compute_reward(
+        ai_pos=ai_pos,
+        player_pos=player_pos,
+        ai_on_ground=ai_on_ground,
+        caught=caught_this_frame
+    )
+    agent.store_reward(reward, done=caught_this_frame)
+
+    # train at end of round
+    if gameover:
+        print(f"[Game] Round over. Survived {elapsed_time:.2f}s — training now...")
+        agent.train()
+
+    # render
+    if not gameover:
+        for obstacle in OBSTACLES:
+            pygame.draw.rect(screen, OBSTACLE_COLOR, obstacle)
+
+        for name, data in ray_data.items():
+            pygame.draw.line(screen, LINE_COLOR, ai_center, data["endpoint"], 2)
+
         player_(player_pos[0], player_pos[1])
         ai(ai_pos[0], ai_pos[1])
     else:
         #game over screen (needs a game over png and replay button)
         text = font_gameover.render("GAME OVER", True, (255, 0, 0))
-        screen.blit(text, (screen.get_width()//2 - text.get_width()//2, screen.get_height()//2 - text.get_height()//2))
+        screen.blit(text, (
+            screen.get_width() // 2 - text.get_width() // 2,
+            screen.get_height() // 2 - text.get_height() // 2
+        ))
         timer_msg = f"Time: {elapsed_time:.2f}s"
         timer_text = font_timer.render(timer_msg, True, (255, 255, 255))
-        screen.blit(timer_text, (screen.get_width()//2 - timer_text.get_width()//2, screen.get_height()//2 + 40))
-
+        screen.blit(timer_text, (
+            screen.get_width() // 2 - timer_text.get_width() // 2,
+            screen.get_height() // 2 + 40
+        ))
 
     pygame.display.update()
