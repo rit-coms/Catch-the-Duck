@@ -1,7 +1,20 @@
 import math
+import sys
+from pathlib import Path
+
 import pygame
 from pygame import Vector2
 import time
+
+'''
+This part here makes it so it opens properly in any directory
+'''
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+VISUAL_DIR = PROJECT_ROOT / "Visual"
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from Model.duck_agent import DuckAgent
 
 """
@@ -19,8 +32,14 @@ pygame.display.set_caption("Catch The Duck!")
 clock = pygame.time.Clock()
 font_gameover = pygame.font.SysFont(None, 72)
 font_timer = pygame.font.SysFont(None, 36)
-background_image = pygame.transform.scale(pygame.image.load("../Visual/CatchTheDuckBackground.PNG").convert(), (SCREEN_WIDTH, SCREEN_HEIGHT))
-map = pygame.transform.scale(pygame.image.load("../Visual/map.png").convert_alpha(), (SCREEN_WIDTH, SCREEN_HEIGHT))
+background_image = pygame.transform.scale(
+    pygame.image.load(VISUAL_DIR / "CatchTheDuckBackground.PNG").convert(),
+    (SCREEN_WIDTH, SCREEN_HEIGHT),
+)
+map = pygame.transform.scale(
+    pygame.image.load(VISUAL_DIR / "map.png").convert_alpha(),
+    (SCREEN_WIDTH, SCREEN_HEIGHT),
+)
 
 gameover = False
 start_time = pygame.time.get_ticks()
@@ -142,7 +161,8 @@ def cast_8_rays(origin, obstacles, screen_w, screen_h, ray_length):
 
 # player
 player_image = pygame.transform.scale(
-    pygame.image.load("../Visual/Ritchie.png"), (34 * CHARACTERS_SCALAR, 51 * CHARACTERS_SCALAR)
+    pygame.image.load(VISUAL_DIR / "Ritchie.png"),
+    (34 * CHARACTERS_SCALAR, 51 * CHARACTERS_SCALAR),
 )
 player_image_flipped = pygame.transform.flip(player_image, True, False)
 PLAYER_SPAWN = (SCREEN_WIDTH/5, 580)
@@ -162,7 +182,10 @@ def player_(x, y):
     screen.blit(sprite, (x, y))
 
 #ai
-ai_image = pygame.transform.scale(pygame.image.load("../Visual/gustavo.png"), (37*CHARACTERS_SCALAR, 51*CHARACTERS_SCALAR))
+ai_image = pygame.transform.scale(
+    pygame.image.load(VISUAL_DIR / "gustavo.png"),
+    (37 * CHARACTERS_SCALAR, 51 * CHARACTERS_SCALAR),
+)
 ai_image_flipped = pygame.transform.flip(ai_image, True, False)
 AI_SPAWN = (SCREEN_WIDTH-(SCREEN_WIDTH/5), 580)
 ai_pos = [AI_SPAWN[0], AI_SPAWN[1]]
