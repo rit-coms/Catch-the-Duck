@@ -58,7 +58,6 @@ GROUND_COLORS = {
     (0x7A, 0x3E, 0x0F),
     (0x3A, 0xA9, 0x4F),
 }
-DEATH_WALL_COLOR = (0xED, 0x4E, 0x4E)
 
 # initialize agent
 agent = DuckAgent()
@@ -67,7 +66,7 @@ agent = DuckAgent()
 def get_map_color(x, y):
     """
     return RGB color of background map at position x,y
-    used to treat map pixels as ground / death walls
+    used to treat map pixels as ground
     returns none if position is off screen.
     """
     xi, yi = int(x), int(y) #makes sure pixels r ints not floats
@@ -84,7 +83,7 @@ def color_matches(pixel_color, target_colors):
 
 def character_inside_color(character, color):
     """
-    checks if the character is inside the ground / death wall
+    checks if the character is inside the ground
     only becomes true when the player is already intersecting the ground pixels
     """
     left = max(0, character.left)
@@ -114,10 +113,6 @@ def character_over_color(character, color):
         if color_matches(get_map_color(x, y), color):
             return True
     return False
-
-
-def respawn(pos, spawn_pos):
-    pos[0], pos[1] = spawn_pos
 
 
 RAY_DIRECTIONS = {
@@ -165,7 +160,7 @@ player_image = pygame.transform.scale(
     (34 * CHARACTERS_SCALAR, 51 * CHARACTERS_SCALAR),
 )
 player_image_flipped = pygame.transform.flip(player_image, True, False)
-PLAYER_SPAWN = (SCREEN_WIDTH/5, 580)
+PLAYER_SPAWN = (SCREEN_WIDTH/5, 540)
 player_pos = [PLAYER_SPAWN[0], PLAYER_SPAWN[1]]
 player_Xmove = 0
 player_facing_left = True
@@ -187,7 +182,7 @@ ai_image = pygame.transform.scale(
     (37 * CHARACTERS_SCALAR, 51 * CHARACTERS_SCALAR),
 )
 ai_image_flipped = pygame.transform.flip(ai_image, True, False)
-AI_SPAWN = (SCREEN_WIDTH-(SCREEN_WIDTH/5), 580)
+AI_SPAWN = (SCREEN_WIDTH-(SCREEN_WIDTH/5), 540)
 ai_pos = [AI_SPAWN[0], AI_SPAWN[1]]
 ai_Xmove = 0
 ai_facing_left = False
@@ -406,21 +401,6 @@ while running:
         ai_image.get_width(), ai_image.get_height(),
         screen.get_width(), screen.get_height()
     )
-
-    #death walls from map color
-    player_rect = player_image.get_rect(x=int(player_pos[0]), y=int(player_pos[1]))
-    if character_inside_color(player_rect, DEATH_WALL_COLOR):
-        respawn(player_pos, PLAYER_SPAWN)
-        player_Yvel = 0
-        player_Xmove = 0
-        player_on_ground = False
-
-    ai_rect = ai_image.get_rect(x=int(ai_pos[0]), y=int(ai_pos[1]))
-    if character_inside_color(ai_rect, DEATH_WALL_COLOR):
-        respawn(ai_pos, AI_SPAWN)
-        ai_Yvel = 0
-        ai_Xmove = 0
-        ai_on_ground = False
 
     # collision
     caught_this_frame = player_image.get_rect(

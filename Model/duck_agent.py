@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch.distributions import Categorical
 from Model.duck_model import ActorCritic
 import os
+from pathlib import Path
 
 # -----------------------------------------------------------
 # Action definitions
@@ -19,7 +20,11 @@ ACTION_COUNT = 6
 # 2 relative pos + 2 duck velocity + 1 grounded + 8 rays = 13
 STATE_DIM = 13
 
-CHECKPOINT_PATH = "../Model/duck_weights.pt"
+'''
+updated it so it opens properly in any directory
+'''
+CHECKPOINT_PATH = Path(__file__).resolve().parent / "duck_weights.pt"
+
 
 # PPO hyperparameters - these are intentionally conservative
 # so training is stable even with noisy ray data
