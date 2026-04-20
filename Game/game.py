@@ -3,7 +3,6 @@ import sys
 from pathlib import Path
 
 import pygame
-from pygame import Vector2
 import time
 
 '''
@@ -46,62 +45,42 @@ start_time = pygame.time.get_ticks()
 elapsed_time = 0.0
 CHARACTERS_SCALAR=1.15 #scaling size of player and AI
 
-OBSTACLES = [
-    pygame.Rect(100, 100, 50, 200),
-    pygame.Rect(600, 150, 150, 50),
-    pygame.Rect(350, 450, 100, 50)
-]
-
 LINE_COLOR = (255, 0, 0) # Red
-OBSTACLE_COLOR = (0, 0, 255) # Blue
-GROUND_COLORS = {
-    (0x7A, 0x3E, 0x0F),
-    (0x3A, 0xA9, 0x4F),
-}
+map_mask = pygame.mask.from_surface(map)
+rect_mask_cache = {}
 
 # initialize agent
 agent = DuckAgent()
 
 
-def get_map_color(x, y):
+def map_solid_at(x, y):
     """
-    return RGB color of background map at position x,y
-    used to treat map pixels as ground
-    returns none if position is off screen.
+    true when map pixel is solid according to map mask.
     """
-    xi, yi = int(x), int(y) #makes sure pixels r ints not floats
+    xi, yi = int(x), int(y)
     if 0 <= xi < SCREEN_WIDTH and 0 <= yi < SCREEN_HEIGHT:
-        return map.get_at((xi, yi))[:3]
-    return None
-
-
-def color_matches(pixel_color, target_colors):
-    if isinstance(target_colors, set):
-        return pixel_color in target_colors
-    return pixel_color == target_colors
-
-
-def character_inside_color(character, color):
-    """
-    checks if the character is inside the ground
-    only becomes true when the player is already intersecting the ground pixels
-    """
-    left = max(0, character.left)
-    right = min(SCREEN_WIDTH, character.right)
-    top = max(0, character.top)
-    bottom = min(SCREEN_HEIGHT, character.bottom)
-
-    for y in range(top, bottom):
-        for x in range(left, right):
-            if color_matches(get_map_color(x, y), color):
-                return True
+        return bool(map_mask.get_at((xi, yi)))
     return False
 
 
-def character_over_color(character, color):
+def get_rect_mask(width, height):
+    key = (width, height)
+    if key not in rect_mask_cache:
+        rect_mask_cache[key] = pygame.mask.Mask(key, fill=True)
+    return rect_mask_cache[key]
+
+
+def character_inside_map(character):
     """
-    checks one row under image character for a map color
-    only detects support just beneath the player (gravity logic basically)
+    true when any part of the character rect overlaps the map.
+    """
+    rect_mask = get_rect_mask(character.width, character.height)
+    return map_mask.overlap(rect_mask, (character.x, character.y)) is not None
+
+
+def character_on_map(character):
+    """
+    checks one row under the character for map support.
     """
     y = character.bottom
     if y < 0 or y >= SCREEN_HEIGHT:
@@ -110,7 +89,7 @@ def character_over_color(character, color):
     left = max(0, character.left)
     right = min(SCREEN_WIDTH, character.right)
     for x in range(left, right):
-        if color_matches(get_map_color(x, y), color):
+        if map_solid_at(x, y):
             return True
     return False
 
@@ -129,7 +108,7 @@ RAY_DIRECTIONS = {
 RAY_LENGTH = max(SCREEN_WIDTH, SCREEN_HEIGHT)
 
 
-def cast_8_rays(origin, obstacles, screen_w, screen_h, ray_length):
+def cast_8_rays(origin, screen_w, screen_h, ray_length):
     results = {}
     for i in range(8):
         angle = math.radians(i * 45)
@@ -137,15 +116,21 @@ def cast_8_rays(origin, obstacles, screen_w, screen_h, ray_length):
         dy = math.sin(angle)
         far_end = (origin[0] + dx * ray_length, origin[1] + dy * ray_length)
         closest_point = far_end
-        closest_dist = Vector2(origin).distance_to(Vector2(far_end))
-        for obstacle in obstacles:
-            clipped = obstacle.clipline(origin, far_end)
-            if clipped:
-                hit_point = clipped[0]
-                dist = Vector2(origin).distance_to(Vector2(hit_point))
-                if dist < closest_dist:
-                    closest_dist = dist
-                    closest_point = hit_point
+        closest_dist = ray_length
+
+        for step in range(1, ray_length + 1):
+            sample_x = origin[0] + dx * step
+            sample_y = origin[1] + dy * step
+
+            if not (0 <= sample_x < screen_w and 0 <= sample_y < screen_h):
+                closest_point = (sample_x, sample_y)
+                closest_dist = step
+                break
+
+            if map_solid_at(sample_x, sample_y):
+                closest_point = (sample_x, sample_y)
+                closest_dist = step
+                break
         results[i] = {
             "distance": closest_dist,
             "endpoint": closest_point,
@@ -253,6 +238,7 @@ def apply_action(action):
 # starting game loop
 running = True
 caught_this_frame = False
+round_trained = False
 
 while running:
     clock.tick(60) #60 fps
@@ -316,7 +302,7 @@ while running:
     # ai logic
     ai_center = [ai_pos[0] + ai_image.get_width() // 2,
                  ai_pos[1] + ai_image.get_height() // 2]
-    ray_data = cast_8_rays(ai_center, OBSTACLES, SCREEN_WIDTH, SCREEN_HEIGHT, RAY_LENGTH)
+    ray_data = cast_8_rays(ai_center, SCREEN_WIDTH, SCREEN_HEIGHT, RAY_LENGTH)
 
     obs = agent.build_observation(
         ai_pos=ai_pos,
@@ -348,43 +334,43 @@ while running:
         ai_Yvel = -ai_jump_strength
         ai_on_ground = False
 
-    #player vertical physics (gravity + landing on map color)
+    #player vertical physics (gravity + landing on map mask)
     player_Yvel += gravity
     player_pos[1] += player_Yvel
     player_rect = player_image.get_rect(x=int(player_pos[0]), y=int(player_pos[1]))
     if player_Yvel >= 0:
-        if character_inside_color(player_rect, GROUND_COLORS):
-            while character_inside_color(player_rect, GROUND_COLORS):
+        if character_inside_map(player_rect):
+            while character_inside_map(player_rect):
                 player_pos[1] -= 1
                 player_rect.y = int(player_pos[1])
             player_Yvel = 0
             player_on_ground = True
         else:
-            player_on_ground = character_over_color(player_rect, GROUND_COLORS)
+            player_on_ground = character_on_map(player_rect)
     else:
-        if character_inside_color(player_rect, GROUND_COLORS):
-            while character_inside_color(player_rect, GROUND_COLORS):
+        if character_inside_map(player_rect):
+            while character_inside_map(player_rect):
                 player_pos[1] += 1
                 player_rect.y = int(player_pos[1])
             player_Yvel = 0
         player_on_ground = False
 
-    #ai vertical physics (gravity + landing on map color)
+    #ai vertical physics (gravity + landing on map mask)
     ai_Yvel += ai_gravity
     ai_pos[1] += ai_Yvel
     ai_rect = ai_image.get_rect(x=int(ai_pos[0]), y=int(ai_pos[1]))
     if ai_Yvel >= 0:
-        if character_inside_color(ai_rect, GROUND_COLORS):
-            while character_inside_color(ai_rect, GROUND_COLORS):
+        if character_inside_map(ai_rect):
+            while character_inside_map(ai_rect):
                 ai_pos[1] -= 1
                 ai_rect.y = int(ai_pos[1])
             ai_Yvel = 0
             ai_on_ground = True
         else:
-            ai_on_ground = character_over_color(ai_rect, GROUND_COLORS)
+            ai_on_ground = character_on_map(ai_rect)
     else:
-        if character_inside_color(ai_rect, GROUND_COLORS):
-            while character_inside_color(ai_rect, GROUND_COLORS):
+        if character_inside_map(ai_rect):
+            while character_inside_map(ai_rect):
                 ai_pos[1] += 1
                 ai_rect.y = int(ai_pos[1])
             ai_Yvel = 0
@@ -423,15 +409,13 @@ while running:
     agent.store_reward(reward, done=caught_this_frame)
 
     # train at end of round
-    if gameover:
+    if gameover and not round_trained:
         print(f"[Game] Round over. Survived {elapsed_time:.2f}s — training now...")
         agent.train()
+        round_trained = True
 
     # render
     if not gameover:
-        for obstacle in OBSTACLES:
-            pygame.draw.rect(screen, OBSTACLE_COLOR, obstacle)
-
         for name, data in ray_data.items():
             pygame.draw.line(screen, LINE_COLOR, ai_center, data["endpoint"], 2)
 
