@@ -27,6 +27,13 @@ start_time = pygame.time.get_ticks()
 elapsed_time = 0.0
 CHARACTERS_SCALAR=1.15 #scaling size of player and AI
 
+# Controller
+pygame.joystick.init()
+
+if pygame.joystick.get_count() > 0:
+    controller = pygame.joystick.Joystick(0)
+    print(f"Connected: {controller.get_name()}")
+
 OBSTACLES = [
     pygame.Rect(100, 100, 50, 200),
     pygame.Rect(600, 150, 150, 50),
@@ -260,7 +267,16 @@ while running:
                         if player_on_ground:
                             player_Yvel = -jump_strength
                             player_on_ground = False
-                    # No more ai WASD controls
+                    case pygame.K_r:
+                        if gameover:
+                            gameover = False
+                            player_pos[:] = list(PLAYER_SPAWN)
+                            ai_pos[:] = list(AI_SPAWN)
+                            player_Yvel = ai_Yvel = 0
+                            player_Xmove = ai_Xmove = 0
+                            player_on_ground = ai_on_ground = True
+                            start_time = pygame.time.get_ticks()
+
             case pygame.KEYUP:
                 match event.key:
                     case pygame.K_LEFT:
@@ -292,8 +308,23 @@ while running:
                             ai_Xmove = 0
                         #stop horizontal movement when key released
 
-        # Get mouse position for line direction
-        mouse_pos = pygame.mouse.get_pos()
+            case pygame.JOYBUTTONDOWN:
+                if event.button == 0:
+                    if player_on_ground:
+                        player_Yvel = -jump_strength
+                        player_on_ground = False
+
+            case pygame.JOYAXISMOTION:
+                if event.axis == 3:
+                    if event.value < -0.5:
+                        player_Xmove = -1
+                        player_facing_left = True
+                    elif event.value > 0.5:
+                        player_Xmove = 1
+                        player_facing_left = False
+                    else:
+                        player_Xmove = 0
+
 
     # ai logic
     ai_center = [ai_pos[0] + ai_image.get_width() // 2,
@@ -418,10 +449,7 @@ while running:
         caught=caught_this_frame
     )
     agent.store_reward(reward, done=caught_this_frame)
-
-    # train at end of round
-    if gameover:
-        print(f"[Game] Round over. Survived {elapsed_time:.2f}s — training now...")
+    if len(agent.rewards) >= 256:
         agent.train()
 
     # render
@@ -434,6 +462,7 @@ while running:
 
         player_(player_pos[0], player_pos[1])
         ai(ai_pos[0], ai_pos[1])
+
     else:
         #game over screen (needs a game over png and replay button)
         text = font_gameover.render("GAME OVER", True, (255, 0, 0))
@@ -441,7 +470,7 @@ while running:
             screen.get_width() // 2 - text.get_width() // 2,
             screen.get_height() // 2 - text.get_height() // 2
         ))
-        timer_msg = f"Time: {elapsed_time:.2f}s"
+        timer_msg = f"Time: {elapsed_time:.2f}s | Press R to replay"
         timer_text = font_timer.render(timer_msg, True, (255, 255, 255))
         screen.blit(timer_text, (
             screen.get_width() // 2 - timer_text.get_width() // 2,

@@ -121,7 +121,7 @@ class DuckAgent:
         # small survival reward every frame
         survival_reward = 0.01
 
-        return survival_reward + dist_reward * 0.1
+        return survival_reward + dist_reward * 0.5
 
     def train(self):
         """
