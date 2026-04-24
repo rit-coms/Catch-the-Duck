@@ -3,8 +3,6 @@ import sys
 from pathlib import Path
 
 import pygame
-from pygame import Vector2
-import time
 
 '''
 This part here makes it so it opens properly in any directory
@@ -15,7 +13,7 @@ VISUAL_DIR = PROJECT_ROOT / "Visual"
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from Model.duck_agent import DuckAgent
+from Model.duck_agent import DuckAgent, BUFFER_SIZE
 
 """
 todo's
@@ -53,15 +51,10 @@ if pygame.joystick.get_count() > 0:
     controller = pygame.joystick.Joystick(0)
     print(f"Connected: {controller.get_name()}")
 
-OBSTACLES = [
-    pygame.Rect(100, 100, 50, 200),
-    pygame.Rect(600, 150, 150, 50),
-    pygame.Rect(350, 450, 100, 50)
-]
-
 LINE_COLOR = (255, 0, 0) # Red
 map_mask = pygame.mask.from_surface(map)
 rect_mask_cache = {}
+prev_dist = 0.0
 
 # initialize agent
 agent = DuckAgent()
@@ -191,6 +184,8 @@ ai_Yvel = 0
 ai_gravity = 0.6
 ai_jump_strength = 12
 ai_on_ground = True
+num_training_loops = 0
+last_mean_reward = 0
 
 def ai(x, y):
     sprite = ai_image_flipped if ai_facing_left else ai_image
@@ -285,6 +280,7 @@ while running:
                             ai_pos[:] = list(AI_SPAWN)
                             player_Yvel = ai_Yvel = 0
                             player_Xmove = ai_Xmove = 0
+                            prev_dist = 0.0
                             player_on_ground = ai_on_ground = True
                             start_time = pygame.time.get_ticks()
 
@@ -437,16 +433,23 @@ while running:
         gameover = True
         elapsed_time = (pygame.time.get_ticks() - start_time) / 1000.0
 
-    # calculate reward and store experience
     reward = agent.compute_reward(
         ai_pos=ai_pos,
         player_pos=player_pos,
         ai_on_ground=ai_on_ground,
-        caught=caught_this_frame
+        caught=caught_this_frame,
+        prev_dist=prev_dist,
+        screen_w=SCREEN_WIDTH,
+        screen_h=SCREEN_HEIGHT
     )
+
+    prev_dist = agent.wrap_aware_dist(ai_pos, player_pos, SCREEN_WIDTH, SCREEN_HEIGHT)
+
     agent.store_reward(reward, done=caught_this_frame)
-    if len(agent.rewards) >= 256:
-        agent.train()
+    if len(agent.rewards) >= BUFFER_SIZE and not gameover:
+        last_mean_reward = agent.train()
+        num_training_loops += 1
+
 
     # render
     if not gameover:
@@ -455,6 +458,10 @@ while running:
 
         player_(player_pos[0], player_pos[1])
         ai(ai_pos[0], ai_pos[1])
+
+        episode_text = font_timer.render(f"Training Loops Completed: {num_training_loops} | Avg Reward: {last_mean_reward:.3f}", True,
+                                         (255, 255, 255))
+        screen.blit(episode_text, (10, 10))
 
     else:
         #game over screen (needs a game over png and replay button)
