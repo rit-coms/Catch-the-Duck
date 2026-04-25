@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 import pygame
+import torch
 
 '''
 This part here makes it so it opens properly in any directory
@@ -13,7 +14,7 @@ VISUAL_DIR = PROJECT_ROOT / "Visual"
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from Model.duck_agent import DuckAgent, BUFFER_SIZE
+from Model.duck_agent import DuckAgent
 
 """
 todo's
@@ -30,6 +31,7 @@ pygame.display.set_caption("Catch The Duck!")
 clock = pygame.time.Clock()
 font_gameover = pygame.font.SysFont(None, 72)
 font_timer = pygame.font.SysFont(None, 36)
+font_small = pygame.font.SysFont(None, 28)
 background_image = pygame.transform.scale(
     pygame.image.load(VISUAL_DIR / "CatchTheDuckBackground.PNG").convert(),
     (SCREEN_WIDTH, SCREEN_HEIGHT),
@@ -42,7 +44,7 @@ map = pygame.transform.scale(
 gameover = False
 start_time = pygame.time.get_ticks()
 elapsed_time = 0.0
-CHARACTERS_SCALAR=1.15 #scaling size of player and AI
+CHARACTERS_SCALAR=1.15
 
 # Controller
 pygame.joystick.init()
@@ -51,7 +53,7 @@ if pygame.joystick.get_count() > 0:
     controller = pygame.joystick.Joystick(0)
     print(f"Connected: {controller.get_name()}")
 
-LINE_COLOR = (255, 0, 0) # Red
+LINE_COLOR = (255, 0, 0)
 map_mask = pygame.mask.from_surface(map)
 rect_mask_cache = {}
 prev_dist = 0.0
@@ -59,11 +61,10 @@ prev_dist = 0.0
 # initialize agent
 agent = DuckAgent()
 
+ACTION_NAMES = ["idle", "left", "right", "jump", "jump+left", "jump+right"]
+
 
 def map_solid_at(x, y):
-    """
-    true when map pixel is solid according to map mask.
-    """
     xi, yi = int(x), int(y)
     if 0 <= xi < SCREEN_WIDTH and 0 <= yi < SCREEN_HEIGHT:
         return bool(map_mask.get_at((xi, yi)))
@@ -78,21 +79,14 @@ def get_rect_mask(width, height):
 
 
 def character_inside_map(character):
-    """
-    true when any part of the character rect overlaps the map.
-    """
     rect_mask = get_rect_mask(character.width, character.height)
     return map_mask.overlap(rect_mask, (character.x, character.y)) is not None
 
 
 def character_on_map(character):
-    """
-    checks one row under the character for map support.
-    """
     y = character.bottom
     if y < 0 or y >= SCREEN_HEIGHT:
         return False
-
     left = max(0, character.left)
     right = min(SCREEN_WIDTH, character.right)
     for x in range(left, right):
@@ -100,17 +94,6 @@ def character_on_map(character):
             return True
     return False
 
-
-RAY_DIRECTIONS = {
-    "right":      ( 1,  0),
-    "left":       (-1,  0),
-    "down":       ( 0,  1),
-    "up":         ( 0, -1),
-    "up_right":   ( 1, -1),
-    "up_left":    (-1, -1),
-    "down_right": ( 1,  1),
-    "down_left":  (-1,  1),
-}
 
 RAY_LENGTH = max(SCREEN_WIDTH, SCREEN_HEIGHT)
 
@@ -157,7 +140,6 @@ player_pos = [PLAYER_SPAWN[0], PLAYER_SPAWN[1]]
 player_Xmove = 0
 player_facing_left = True
 
-#player jumping variables
 player_Yvel = 0
 gravity = 0.6
 jump_strength = 12
@@ -165,7 +147,6 @@ player_on_ground = True
 
 def player_(x, y):
     sprite = player_image if player_facing_left else player_image_flipped
-    player_rect = pygame.Rect(x, y, 31, 51)
     screen.blit(sprite, (x, y))
 
 #ai
@@ -179,22 +160,20 @@ ai_pos = [AI_SPAWN[0], AI_SPAWN[1]]
 ai_Xmove = 0
 ai_facing_left = False
 
-#ai jumping variables
 ai_Yvel = 0
 ai_gravity = 0.6
 ai_jump_strength = 12
 ai_on_ground = True
 num_training_loops = 0
-last_mean_reward = 0
+last_mean_reward = 0.0
+current_action = 0
+current_probs = [1/6] * 6
 
 def ai(x, y):
     sprite = ai_image_flipped if ai_facing_left else ai_image
-    ai_rect = pygame.Rect(x, y, 51, 51)
     screen.blit(sprite, (x, y))
 
-"""
-wrap around screen edges when fully off screen
-"""
+
 def wrap_around(x_pos, y_pos, width, height, screen_width, screen_height):
     if x_pos > screen_width:
         x_pos = -width
@@ -208,35 +187,25 @@ def wrap_around(x_pos, y_pos, width, height, screen_width, screen_height):
 
 
 def apply_action(action):
-    """
-    Translates action index into duck movement.
-    Returns (x_move, should_jump, facing_left)
-    0: idle
-    1: left
-    2: right
-    3: jump
-    4: jump + left
-    5: jump + right
-    """
     x_move = 0
     should_jump = False
-    facing = ai_facing_left  # default: keep current facing
+    facing = ai_facing_left
 
-    if action == 0:   # idle
+    if action == 0:
         x_move = 0
-    elif action == 1: # left
+    elif action == 1:
         x_move = -1
         facing = True
-    elif action == 2: # right
+    elif action == 2:
         x_move = 1
         facing = False
-    elif action == 3: # jump
+    elif action == 3:
         should_jump = True
-    elif action == 4: # jump + left
+    elif action == 4:
         x_move = -1
         should_jump = True
         facing = True
-    elif action == 5: # jump + right
+    elif action == 5:
         x_move = 1
         should_jump = True
         facing = False
@@ -244,96 +213,175 @@ def apply_action(action):
     return x_move, should_jump, facing
 
 
-# starting game loop
+def reset_duck():
+    global ai_pos, ai_Yvel, ai_Xmove, ai_on_ground, ai_facing_left, prev_dist
+    ai_pos[:] = list(AI_SPAWN)
+    ai_Yvel = 0
+    ai_Xmove = 0
+    ai_on_ground = True
+    ai_facing_left = False
+    prev_dist = 0.0
+
+
+def reset_player():
+    global player_pos, player_Yvel, player_Xmove, player_on_ground, player_facing_left
+    player_pos[:] = list(PLAYER_SPAWN)
+    player_Yvel = 0
+    player_Xmove = 0
+    player_on_ground = True
+    player_facing_left = True
+
+
+# ghost round state
+player_recording = []
+last_recording = []
+is_ghost_round = False
+ghost_round_count = 0
+MAX_GHOST_ROUNDS = 15
+ghost_frame = 0
+
+# waiting for player to start next round after training
+waiting_for_start = False
+
 running = True
 caught_this_frame = False
-round_trained = False
 
 while running:
-    clock.tick(60) #60 fps
 
     screen.blit(background_image, (0, 0))
-    screen.blit(map,(0,0))
-    keys = pygame.key.get_pressed() #key state checker
+    screen.blit(map, (0, 0))
+    keys = pygame.key.get_pressed()
 
-    #event scanner
+    # --- ghost round: override player position from recording ---
+    if is_ghost_round:
+        if ghost_frame < len(last_recording):
+            player_pos[0], player_pos[1] = last_recording[ghost_frame]
+            ghost_frame += 1
+        else:
+            result = agent.train()
+            if result is not None:
+                last_mean_reward = result
+            num_training_loops += 1
+            ghost_round_count += 1
+
+            if ghost_round_count >= MAX_GHOST_ROUNDS:
+                is_ghost_round = False
+                waiting_for_start = True
+                reset_player()
+                reset_duck()
+                player_recording = []
+            else:
+                reset_duck()
+                ghost_frame = 0
+    else:
+        clock.tick(60)
+
+    # event scanner
     for event in pygame.event.get():
         match event.type:
             case pygame.QUIT:
                 running = False
             case pygame.KEYDOWN:
-                match event.key:
-                    case pygame.K_LEFT:
-                        player_Xmove = -1
-                        player_facing_left = True
-                    case pygame.K_RIGHT:
-                        player_Xmove = 1
-                        player_facing_left = False
-                    case pygame.K_UP:
-                        if player_on_ground:
-                            player_Yvel = -jump_strength
-                            player_on_ground = False
-                    case pygame.K_r:
-                        if gameover:
-                            gameover = False
-                            player_pos[:] = list(PLAYER_SPAWN)
-                            ai_pos[:] = list(AI_SPAWN)
-                            player_Yvel = ai_Yvel = 0
-                            player_Xmove = ai_Xmove = 0
-                            prev_dist = 0.0
-                            player_on_ground = ai_on_ground = True
-                            start_time = pygame.time.get_ticks()
+                # space starts next round after training
+                if waiting_for_start and event.key == pygame.K_SPACE:
+                    waiting_for_start = False
+                    gameover = False
+                    start_time = pygame.time.get_ticks()
+
+                elif not is_ghost_round and not waiting_for_start:
+                    match event.key:
+                        case pygame.K_LEFT:
+                            player_Xmove = -1.5
+                            player_facing_left = True
+                        case pygame.K_RIGHT:
+                            player_Xmove = 1.5
+                            player_facing_left = False
+                        case pygame.K_UP:
+                            if player_on_ground:
+                                player_Yvel = -jump_strength
+                                player_on_ground = False
+                        case pygame.K_r:
+                            if gameover:
+                                gameover = False
+                                reset_player()
+                                reset_duck()
+                                player_recording = []
+                                start_time = pygame.time.get_ticks()
 
             case pygame.KEYUP:
-                match event.key:
-                    case pygame.K_LEFT:
-                        if keys[pygame.K_RIGHT]:
-                            player_Xmove = 1
-                            player_facing_left = False
-                        else:
-                            player_Xmove = 0
-                        #stop horizontal movement when key released
-                    case pygame.K_RIGHT:
-                        if keys[pygame.K_LEFT]:
-                            player_Xmove = -1
-                            player_facing_left = True
-                        else:
-                            player_Xmove = 0
-                        #stop horizontal movement when key released
-                    case pygame.K_a:
-                        if keys[pygame.K_d]:
-                            ai_Xmove = 1
-                            ai_facing_left = False
-                        else:
-                            ai_Xmove = 0
-                        #stop horizontal movement when key released
-                    case pygame.K_d:
-                        if keys[pygame.K_a]:
-                            ai_Xmove = -1
-                            ai_facing_left = True
-                        else:
-                            ai_Xmove = 0
-                        #stop horizontal movement when key released
+                if not is_ghost_round and not waiting_for_start:
+                    match event.key:
+                        case pygame.K_LEFT:
+                            if keys[pygame.K_RIGHT]:
+                                player_Xmove = 1.5
+                                player_facing_left = False
+                            else:
+                                player_Xmove = 0
+                        case pygame.K_RIGHT:
+                            if keys[pygame.K_LEFT]:
+                                player_Xmove = -1.5
+                                player_facing_left = True
+                            else:
+                                player_Xmove = 0
+                        case pygame.K_a:
+                            if keys[pygame.K_d]:
+                                ai_Xmove = 1.5
+                                ai_facing_left = False
+                            else:
+                                ai_Xmove = 0
+                        case pygame.K_d:
+                            if keys[pygame.K_a]:
+                                ai_Xmove = -1.5
+                                ai_facing_left = True
+                            else:
+                                ai_Xmove = 0
 
             case pygame.JOYBUTTONDOWN:
-                if event.button == 0:
+                if not is_ghost_round and not waiting_for_start and event.button == 0:
                     if player_on_ground:
                         player_Yvel = -jump_strength
                         player_on_ground = False
+                if waiting_for_start and event.button == 2:
+                    waiting_for_start = False
+                    gameover = False
+                    start_time = pygame.time.get_ticks()
 
             case pygame.JOYAXISMOTION:
-                if event.axis == 3:
+                if not is_ghost_round and not waiting_for_start and event.axis == 3:
                     if event.value < -0.5:
-                        player_Xmove = -1
+                        player_Xmove = -1.5
                         player_facing_left = True
                     elif event.value > 0.5:
-                        player_Xmove = 1
+                        player_Xmove = 1.5
                         player_facing_left = False
                     else:
                         player_Xmove = 0
 
+    # --- waiting for start screen ---
+    if waiting_for_start:
+        screen.fill((0, 0, 0))
+        done_text = font_gameover.render("Training Complete!", True, (255, 255, 0))
+        stats_text = font_timer.render(
+            f"Training Loops: {num_training_loops} | Avg Reward: {last_mean_reward:.3f}",
+            True, (255, 255, 255)
+        )
+        start_text = font_timer.render("Press B to start the next round", True, (0, 255, 0))
+        screen.blit(done_text, (
+            SCREEN_WIDTH // 2 - done_text.get_width() // 2,
+            SCREEN_HEIGHT // 2 - 80
+        ))
+        screen.blit(stats_text, (
+            SCREEN_WIDTH // 2 - stats_text.get_width() // 2,
+            SCREEN_HEIGHT // 2
+        ))
+        screen.blit(start_text, (
+            SCREEN_WIDTH // 2 - start_text.get_width() // 2,
+            SCREEN_HEIGHT // 2 + 60
+        ))
+        pygame.display.update()
+        continue
 
-    # ai logic
+    # --- ai logic ---
     ai_center = [ai_pos[0] + ai_image.get_width() // 2,
                  ai_pos[1] + ai_image.get_height() // 2]
     ray_data = cast_8_rays(ai_center, SCREEN_WIDTH, SCREEN_HEIGHT, RAY_LENGTH)
@@ -351,45 +399,49 @@ while running:
 
     action = agent.select_action(obs)
     ai_Xmove, should_jump, ai_facing_left = apply_action(action)
+    current_action = action
+
+    # grab probs for HUD display
+    with torch.no_grad():
+        probs, _ = agent.model(obs)
+    current_probs = probs.numpy()
 
     if should_jump and ai_on_ground:
         ai_Yvel = -ai_jump_strength
         ai_on_ground = False
 
-    # horizontal movement
-    player_pos[0] += player_Xmove
+    if not is_ghost_round:
+        player_pos[0] += player_Xmove
     ai_pos[0] += ai_Xmove
 
-    # auto-jumping for player
-    if player_on_ground and keys[pygame.K_UP]:
-        player_Yvel = -jump_strength
-        player_on_ground = False
-    if ai_on_ground and keys[pygame.K_w]:
-        ai_Yvel = -ai_jump_strength
-        ai_on_ground = False
+    if not is_ghost_round:
+        if player_on_ground and keys[pygame.K_UP]:
+            player_Yvel = -jump_strength
+            player_on_ground = False
 
-    #player vertical physics (gravity + landing on map mask)
-    player_Yvel += gravity
-    player_pos[1] += player_Yvel
-    player_rect = player_image.get_rect(x=int(player_pos[0]), y=int(player_pos[1]))
-    if player_Yvel >= 0:
-        if character_inside_map(player_rect):
-            while character_inside_map(player_rect):
-                player_pos[1] -= 1
-                player_rect.y = int(player_pos[1])
-            player_Yvel = 0
-            player_on_ground = True
+    # player vertical physics
+    if not is_ghost_round:
+        player_Yvel += gravity
+        player_pos[1] += player_Yvel
+        player_rect = player_image.get_rect(x=int(player_pos[0]), y=int(player_pos[1]))
+        if player_Yvel >= 0:
+            if character_inside_map(player_rect):
+                while character_inside_map(player_rect):
+                    player_pos[1] -= 1
+                    player_rect.y = int(player_pos[1])
+                player_Yvel = 0
+                player_on_ground = True
+            else:
+                player_on_ground = character_on_map(player_rect)
         else:
-            player_on_ground = character_on_map(player_rect)
-    else:
-        if character_inside_map(player_rect):
-            while character_inside_map(player_rect):
-                player_pos[1] += 1
-                player_rect.y = int(player_pos[1])
-            player_Yvel = 0
-        player_on_ground = False
+            if character_inside_map(player_rect):
+                while character_inside_map(player_rect):
+                    player_pos[1] += 1
+                    player_rect.y = int(player_pos[1])
+                player_Yvel = 0
+            player_on_ground = False
 
-    #ai vertical physics (gravity + landing on map mask)
+    # ai vertical physics
     ai_Yvel += ai_gravity
     ai_pos[1] += ai_Yvel
     ai_rect = ai_image.get_rect(x=int(ai_pos[0]), y=int(ai_pos[1]))
@@ -410,12 +462,13 @@ while running:
             ai_Yvel = 0
         ai_on_ground = False
 
-    #wrap around screen edges
-    player_pos[0], player_pos[1] = wrap_around(
-        player_pos[0], player_pos[1],
-        player_image.get_width(), player_image.get_height(),
-        screen.get_width(), screen.get_height()
-    )
+    # wrap around
+    if not is_ghost_round:
+        player_pos[0], player_pos[1] = wrap_around(
+            player_pos[0], player_pos[1],
+            player_image.get_width(), player_image.get_height(),
+            screen.get_width(), screen.get_height()
+        )
     ai_pos[0], ai_pos[1] = wrap_around(
         ai_pos[0], ai_pos[1],
         ai_image.get_width(), ai_image.get_height(),
@@ -429,10 +482,42 @@ while running:
         ai_image.get_rect(x=ai_pos[0], y=ai_pos[1])
     )
 
-    if caught_this_frame and not gameover:
+    # handle real round gameover
+    if caught_this_frame and not gameover and not is_ghost_round:
         gameover = True
         elapsed_time = (pygame.time.get_ticks() - start_time) / 1000.0
+        result = agent.train()
+        if result is not None:
+            last_mean_reward = result
+        num_training_loops += 1
+        last_recording = [pos[:] for pos in player_recording]
+        player_recording = []
+        if len(last_recording) > 0:
+            is_ghost_round = True
+            ghost_round_count = 0
+            ghost_frame = 0
+            gameover = False
+            reset_duck()
 
+    # handle ghost round catch
+    if caught_this_frame and is_ghost_round:
+        result = agent.train()
+        if result is not None:
+            last_mean_reward = result
+        num_training_loops += 1
+        ghost_round_count += 1
+
+        if ghost_round_count >= MAX_GHOST_ROUNDS:
+            is_ghost_round = False
+            waiting_for_start = True
+            reset_player()
+            reset_duck()
+            player_recording = []
+        else:
+            reset_duck()
+            ghost_frame = 0
+
+    # reward
     reward = agent.compute_reward(
         ai_pos=ai_pos,
         player_pos=player_pos,
@@ -440,31 +525,49 @@ while running:
         caught=caught_this_frame,
         prev_dist=prev_dist,
         screen_w=SCREEN_WIDTH,
-        screen_h=SCREEN_HEIGHT
+        screen_h=SCREEN_HEIGHT,
+        action=action
     )
-
     prev_dist = agent.wrap_aware_dist(ai_pos, player_pos, SCREEN_WIDTH, SCREEN_HEIGHT)
 
+    if not is_ghost_round and not gameover:
+        player_recording.append(player_pos[:])
+
     agent.store_reward(reward, done=caught_this_frame)
-    if len(agent.rewards) >= BUFFER_SIZE and not gameover:
-        last_mean_reward = agent.train()
-        num_training_loops += 1
 
+    # --- render ---
+    if is_ghost_round:
+        screen.fill((0, 0, 0))
+        training_text = font_gameover.render("Training...", True, (255, 255, 0))
+        round_text = font_timer.render(
+            f"Ghost Round {ghost_round_count + 1}/{MAX_GHOST_ROUNDS} | "
+            f"Training Loops: {num_training_loops} | Avg Reward: {last_mean_reward:.3f}",
+            True, (255, 255, 255)
+        )
+        screen.blit(training_text, (
+            SCREEN_WIDTH // 2 - training_text.get_width() // 2,
+            SCREEN_HEIGHT // 2 - training_text.get_height() // 2
+        ))
+        screen.blit(round_text, (
+            SCREEN_WIDTH // 2 - round_text.get_width() // 2,
+            SCREEN_HEIGHT // 2 + 40
+        ))
 
-    # render
-    if not gameover:
+    elif not gameover:
         for name, data in ray_data.items():
             pygame.draw.line(screen, LINE_COLOR, ai_center, data["endpoint"], 2)
 
         player_(player_pos[0], player_pos[1])
         ai(ai_pos[0], ai_pos[1])
 
-        episode_text = font_timer.render(f"Training Loops Completed: {num_training_loops} | Avg Reward: {last_mean_reward:.3f}", True,
-                                         (255, 255, 255))
+        # top stats
+        episode_text = font_timer.render(
+            f"Training Loops: {num_training_loops} | Avg Reward: {last_mean_reward:.3f}",
+            True, (255, 255, 255)
+        )
         screen.blit(episode_text, (10, 10))
 
     else:
-        #game over screen (needs a game over png and replay button)
         text = font_gameover.render("GAME OVER", True, (255, 0, 0))
         screen.blit(text, (
             screen.get_width() // 2 - text.get_width() // 2,

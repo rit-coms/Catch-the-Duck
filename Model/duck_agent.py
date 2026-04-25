@@ -107,7 +107,7 @@ class DuckAgent:
         self.rewards.append(reward)
         self.dones.append(done)
 
-    def compute_reward(self, ai_pos, player_pos, ai_on_ground, caught, prev_dist, screen_w, screen_h):
+    def compute_reward(self, ai_pos, player_pos, ai_on_ground, caught, prev_dist, screen_w, screen_h, action=0):
         if caught:
             return -20.0
 
@@ -121,9 +121,19 @@ class DuckAgent:
 
         dist = (dx ** 2 + dy ** 2) ** 0.5
         delta = dist - prev_dist
+        delta_reward = 1.0 * (delta / 10.0)
+        dist_reward = (dist / screen_w) * 2.0
 
-        # just reward moving away, nothing else
-        return delta / 10.0
+        if dist < 150:
+            proximity_penalty = -0.5 * (1.0 - dist / 150.0)
+            escape_bonus = 0.3 if delta > 0 else 0.0
+            reward = delta_reward + proximity_penalty + escape_bonus
+        else:
+            # only reward distance if actively moving away or holding position
+            movement_bonus = 0.5 if delta >= 0 else 0.0
+            reward = dist_reward * movement_bonus + delta_reward
+
+        return reward
 
     def train(self):
         """
@@ -135,17 +145,21 @@ class DuckAgent:
             return
 
         # --- compute discounted returns ---
-        returns = []
-        G = 0
-        for reward, done in zip(reversed(self.rewards), reversed(self.dones)):
-            G = reward + GAMMA * G * (1 - done)
-            returns.insert(0, G)
+        # trim all buffers to the same length to avoid size mismatches
+        min_len = min(len(self.states), len(self.actions), len(self.log_probs),
+                      len(self.rewards), len(self.values), len(self.dones))
 
-        returns = torch.tensor(returns, dtype=torch.float32)
-        states = torch.stack(self.states)
-        actions = torch.stack(self.actions)
-        old_log_probs = torch.stack(self.log_probs).detach()
-        values = torch.stack(self.values).detach()
+        returns_list = []
+        G = 0
+        for reward, done in zip(reversed(self.rewards[:min_len]), reversed(self.dones[:min_len])):
+            G = reward + GAMMA * G * (1 - done)
+            returns_list.insert(0, G)
+
+        returns = torch.tensor(returns_list, dtype=torch.float32)
+        states = torch.stack(self.states[:min_len])
+        actions = torch.stack(self.actions[:min_len])
+        old_log_probs = torch.stack(self.log_probs[:min_len]).detach()
+        values = torch.stack(self.values[:min_len]).detach()
 
         # normalize advantages — makes training more stable
         advantages = returns - values
@@ -189,6 +203,10 @@ class DuckAgent:
 
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         print(f"advantage std: {advantages.std():.4f} | returns mean: {returns.mean():.4f} | returns std: {returns.std():.4f}")
+
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        print(
+            f"adv std: {advantages.std():.4f} | returns mean: {returns.mean():.4f} | returns std: {returns.std():.4f}")
 
         print(f"[DuckAgent] Training done. "
               f"Steps: {len(self.rewards)} | "
